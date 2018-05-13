@@ -62,6 +62,8 @@ import os    # Used for saving pictures locally.
 import glob  # Used for saving pictures locally.
 import math
 
+####import unicodedata # Mirphak: test to prevent "UnicodeEncodeError: 'ascii' codec can't encode character" ### ce module n'exite pas!!
+
 import xLocTools
 import xEnum
 from xMarkerGameManager import *    # Logic for Marker Games.
@@ -79,6 +81,13 @@ import xKIExtChatCommands
 import xKIChat
 from xKIConstants import *
 from xKIHelpers import *
+
+# Marker Editor.
+import xMarkerEditor
+import yaml
+
+# Robot commands
+import xKiBot
 
 # Define the attributes that will be entered in Max.
 KIBlackbar = ptAttribGUIDialog(1, "The Blackbar dialog")
@@ -275,7 +284,10 @@ class xKI(ptModifier):
         self.autocompleteState = AutocompleteState()
 
         ## The chatting manager.
-        self.chatMgr = xKIChat.xKIChat(self.StartFadeTimer, self.KillFadeTimer, self.FadeCompletely)
+        self.chatMgr = xKIChat.xKIChat(self.StartFadeTimer, self.KillFadeTimer, self.FadeCompletely, self)
+
+        ## Marker Editor.
+        self.editor = xMarkerEditor.GetEditor()
 
     ## Unloads any loaded dialogs upon exit.
     def __del__(self):
@@ -1034,109 +1046,242 @@ class xKI(ptModifier):
     # The game client handles Marker Games.
     def OnGameCliMsg(self, msg):
 
-        msgType = msg.getType()
+        if self.editor["uploadedGame"]:
+            msg = msg.upcastToGameMsg()
+            msgType = msg.getType()
+            if msgType == PtGameCliMsgTypes.kGameCliMarkerMsg:
+                markerMsgType = msg.getMarkerMsgType()
+                msg = msg.upcastToFinalMarkerMsg()
+                if markerMsgType == PtMarkerMsgTypes.kMarkerMarkerAdded:
+                    self.editor["uploadedGamesMarkers"] += 1
+                if self.editor["uploadedGamesMarkers"] == self.editor["uploadedGamesMarkersTotal"]:
+                    self.editor["uploadedGame"] = False
+            
+        # If the user requested a marker game download... 
+        elif self.editor["downloading"]:
+            
+            # Initialize the Game Client.
+            if self.editor["client"] is None:
+                self.editor["client"] = msg.getGameCli().upcastToMarkerGame()
+            
+            msg = msg.upcastToGameMsg()
+            msgType = msg.getType()
+            
+            # If the message is a marker game message...
+            if msgType == PtGameCliMsgTypes.kGameCliMarkerMsg:
+                markerMsgType = msg.getMarkerMsgType()
+                msg = msg.upcastToFinalMarkerMsg()
 
-        if msgType == PtGameCliMsgTypes.kGameCliPlayerJoinedMsg:
-            joinMsg = msg.upcastToFinalGameCliMsg()
-            if joinMsg.playerID() != PtGetLocalClientID():
-                return
-            if self.markerGameDisplay is not None:
-                self.markerGameDisplay.registerPlayerJoin(joinMsg)
-            else:
-                self.markerGameManager.registerPlayerJoin(joinMsg)
-            return
+                # If a marker is being added...
+                if markerMsgType == PtMarkerMsgTypes.kMarkerMarkerAdded:
+                    m = msg
+                    #self.editor["game"]["markers"].append({"age" : str(m.age()), "text" : str(m.name()), "coords" : [m.x(), m.y(), m.z()]})
+                    try:
+                        self.editor["game"]["markers"].append({"age" : str(m.age()), "text" : str(m.name()), "coords" : [m.x(), m.y(), m.z()]})
+                    except UnicodeEncodeError:
+                        markerName = "".join([x if ord(x) < 128 else '?' for x in m.name()])
+                        self.chatMgr.DisplayStatusMessage("There is a non ascii character in the name of this marker! (game id:{0}, marker name: \"{1}\")".format(self.editor["downloading_id"], markerName))
+                        self.editor["game"]["markers"].append({"age" : str(m.age()), "text" : markerName, "coords" : [m.x(), m.y(), m.z()]})
+                        
+                # Else if this is the last message...
+                elif markerMsgType == PtMarkerMsgTypes.kMarkerGameNameChanged:
+                    #self.editor["game"]["creator"] = PtGetLocalPlayer().getPlayerName()
+                    if not isinstance(self.editor["game"]["creator"], str):
+                        self.editor["game"]["creatorID"] = PtGetLocalPlayer().getPlayerID()
+                        self.editor["game"]["creator"] = PtGetLocalPlayer().getPlayerName()
+                    filename = ""
+                    for c in self.editor["game"]["creator"]:
+                        if c.isalnum():
+                            filename += c
+                    #file = open("Games/" + filename + "." + str(self.editor["downloading_id"]) + ".txt", "w")
+                    #filename += "_" + creatorID + "_" + str(self.editor["downloading_id"])
+                    filename += "_" + str(self.editor["downloading_id"])
+                    
+                    """ *** TEST *** """
+                    # Determine which mode we're in.
+                    if self.markerGameManager.gameLoaded():
+                        # A game is in progress, restrict access.
+                        if self.markerGameManager.gameData.data["svrGameTemplateID"] == self.editor["game"]["guid"]:
+                            #self.MFdialogMode = kGames.MFPlaying
+                            filename += "_" + "Playing"
+                        else:
+                            #self.MFdialogMode = kGames.MFOverview
+                            filename += "_" + "Overview"
+                    #else:
+                    #    # No game in progress, checking status of Marker Game display.
+                    #    if mGame.showMarkers:
+                    #        if mGame.selectedMarker > -1:
+                    #            self.MFdialogMode = kGames.MFEditingMarker
+                    #        else:
+                    #            self.MFdialogMode = kGames.MFEditing
+                    #    else:
+                    #        self.MFdialogMode = kGames.MFOverview
 
-        if msgType != PtGameCliMsgTypes.kGameCliMarkerMsg:
-            return
+                    file = open("Games/" + filename + ".txt", "w")
+                    file.write(yaml.dump(self.editor["game"], indent=4))
+                    file.close()
+                    self.BigKIRefreshFolderList()
+                    self.BigKIRefreshFolderDisplay()
+                    self.BigKIRefreshContentList()
+                    self.BigKIRefreshContentListDisplay()
+                    self.editor = xMarkerEditor.GetEditor()
+                    
+        # Else if the user requested a marker game upload...
+        elif self.editor["uploading"]:
+            
+            # Initialize the Game Client.
+            if self.editor["client"] is None:
+                self.editor["client"] = msg.getGameCli().upcastToMarkerGame()
+            
+            msg = msg.upcastToGameMsg()
+            msgType = msg.getType()
+            
+            # If the message is a marker game message...
+            if msgType == PtGameCliMsgTypes.kGameCliMarkerMsg:
+                markerMsgType = msg.getMarkerMsgType()
+                msg = msg.upcastToFinalMarkerMsg()
 
-        msg = msg.upcastToGameMsg()
-        msgType = msg.getMarkerMsgType()
-        finalMsg = msg.upcastToFinalMarkerMsg()
+                # If a marker is being added...
+                if markerMsgType == PtMarkerMsgTypes.kMarkerMarkerAdded:
+                    self.editor["client"].deleteMarker(msg.markerId())
+                
+                # Else if we are creating a new game...
+                elif markerMsgType == PtMarkerMsgTypes.kMarkerTemplateCreated:
+                    self.BigKIRefreshFolderList()
+                    journal = self.BKJournalFolderDict[self.GetAgeInstanceName()]
+                    markerGameNode = ptVaultMarkerGameNode()
+                    try:
+                        markerGameNode.setGameName(self.editor["game"]["name"])
+                    except UnicodeEncodeError:
+                        #replace non ascii characters by "?"
+                        gameName = "".join([x if ord(x) < 128 else '?' for x in self.editor["game"]["name"]])
+                        markerGameNode.setGameName(gameName)
+                    markerGameNode.setGameGuid(msg.templateID())
+                    self.editor["node"] = journal.addNode(markerGameNode).getChild().upcastToMarkerGameNode()
+                # Else if this is the last message...
+                elif markerMsgType == PtMarkerMsgTypes.kMarkerGameNameChanged:
+                    for marker in self.editor["game"]["markers"]:
+                        try:
+                            self.editor["client"].addMarker(marker["coords"][0], marker["coords"][1], marker["coords"][2], marker["text"], marker["age"])
+                        except UnicodeEncodeError:
+                            #replace non ascii characters by "?"
+                            markerName = "".join([x if ord(x) < 128 else '?' for x in marker["text"]])
+                            self.editor["client"].addMarker(marker["coords"][0], marker["coords"][1], marker["coords"][2], markerName, marker["age"])
+                        self.editor["uploadedGamesMarkersTotal"] += 1
+                    self.editor["node"].setGameName(self.editor["game"]["name"])
+                    self.editor["node"].save()
+                    self.chatMgr.DisplayStatusMessage("Your game has been uploaded.")
+                    self.BigKIRefreshFolderList()
+                    self.BigKIRefreshFolderDisplay()
+                    self.BigKIRefreshContentList()
+                    self.BigKIRefreshContentListDisplay()
+                    self.editor = xMarkerEditor.GetEditor()
 
-        # Is a template being created?
-        if msgType == PtMarkerMsgTypes.kMarkerTemplateCreated:
-            if self.markerGameDisplay is not None:
-                self.markerGameDisplay.registerTemplateCreated(finalMsg)
-            else:
-                self.markerGameManager.registerTemplateCreated(finalMsg)
+        # Otherwise it's a message that should be processed normally.
+        else:
+            msgType = msg.getType()
 
-        # Is a game being started?
-        elif msgType == PtMarkerMsgTypes.kMarkerGameStarted:
-            if self.markerGameDisplay is not None and self.markerGameDisplay.isMyMsg(finalMsg):
-                self.BigKICheckContentRefresh(self.BKCurrentContent)
-
-        # Is a game being paused?
-        elif msgType == PtMarkerMsgTypes.kMarkerGamePaused:
-            if self.markerGameManager.isMyMsg(finalMsg):
-                self.markerGameManager.registerPauseGame(finalMsg)
-            self.BigKICheckContentRefresh(self.BKCurrentContent)
-
-        # Is a game being reset?
-        elif msgType == PtMarkerMsgTypes.kMarkerGameReset:
-            self.markerGameManager.registerResetGame(finalMsg)
-            self.markerGameDisplay.registerResetGame(finalMsg)
-            self.BigKICheckContentRefresh(self.BKCurrentContent)
-
-        # Is a game over?
-        elif msgType == PtMarkerMsgTypes.kMarkerGameOver:
-            self.markerGameManager.registerMarkerGameOver(finalMsg)
-
-        # Is a game's name being changed?
-        elif msgType == PtMarkerMsgTypes.kMarkerGameNameChanged:
-            if self.markerGameDisplay is not None:
-                if self.markerGameDisplay.isMyMsg(finalMsg):
-                    self.markerGameDisplay.registerGameName(finalMsg)
-                return
-            self.markerGameManager.registerGameName(finalMsg)
-
-        # Is a game being deleted?
-        elif msgType == PtMarkerMsgTypes.kMarkerGameDeleted:
-            if self.markerGameDisplay is not None:
-                if self.markerGameDisplay.isMyMsg(finalMsg):
-                    self.markerGameDisplay = None
-            self.markerGameManager.registerDeleteGame(finalMsg)
-
-        # Is a marker being added?
-        elif msgType == PtMarkerMsgTypes.kMarkerMarkerAdded:
-            if self.markerGameDisplay is not None:
-                if self.markerGameDisplay.isMyMsg(finalMsg):
-                    self.markerGameDisplay.registerMarker(finalMsg)
-                    if self.pendingMGmessage is not None and self.pendingMGmessage == kMessageWait.createMarker and BigKI.dialog.isEnabled():
-                        self.pendingMGmessage = None
-                        self.SetWorkingToCurrentMarkerGame()
+            if msgType == PtGameCliMsgTypes.kGameCliPlayerJoinedMsg:
+                joinMsg = msg.upcastToFinalGameCliMsg()
+                if joinMsg.playerID() != PtGetLocalClientID():
                     return
-            self.pendingMGmessage = None
-            self.markerGameManager.registerMarker(finalMsg)
+                if self.markerGameDisplay is not None:
+                    self.markerGameDisplay.registerPlayerJoin(joinMsg)
+                else:
+                    self.markerGameManager.registerPlayerJoin(joinMsg)
+                return
 
-        # Is a marker being deleted?
-        elif msgType == PtMarkerMsgTypes.kMarkerMarkerDeleted:
-            if self.markerGameDisplay is not None and self.markerGameDisplay.isMyMsg(finalMsg):
-                self.markerGameDisplay.registerDeleteMarker(finalMsg)
+            if msgType != PtGameCliMsgTypes.kGameCliMarkerMsg:
+                return
+
+            msg = msg.upcastToGameMsg()
+            msgType = msg.getMarkerMsgType()
+            finalMsg = msg.upcastToFinalMarkerMsg()
+
+            # Is a template being created?
+            if msgType == PtMarkerMsgTypes.kMarkerTemplateCreated:
+                if self.markerGameDisplay is not None:
+                    self.markerGameDisplay.registerTemplateCreated(finalMsg)
+                else:
+                    self.markerGameManager.registerTemplateCreated(finalMsg)
+
+            # Is a game being started?
+            elif msgType == PtMarkerMsgTypes.kMarkerGameStarted:
+                if self.markerGameDisplay is not None and self.markerGameDisplay.isMyMsg(finalMsg):
+                    self.BigKICheckContentRefresh(self.BKCurrentContent)
+
+            # Is a game being paused?
+            elif msgType == PtMarkerMsgTypes.kMarkerGamePaused:
+                if self.markerGameManager.isMyMsg(finalMsg):
+                    self.markerGameManager.registerPauseGame(finalMsg)
                 self.BigKICheckContentRefresh(self.BKCurrentContent)
 
-        # Is a marker's name being changed?
-        elif msgType == PtMarkerMsgTypes.kMarkerMarkerNameChanged:
-            if self.markerGameDisplay is not None and self.markerGameDisplay.isMyMsg(finalMsg):
-                self.markerGameDisplay.registerMarkerNameChanged(finalMsg)
-                if self.pendingMGmessage is not None and self.pendingMGmessage == kMessageWait.changeMarkerName:
-                    if self.MFdialogMode == kGames.MFEditingMarker:
-                        self.BigKICheckContentRefresh(self.BKCurrentContent)
-            self.pendingMGmessage = None
+            # Is a game being reset?
+            elif msgType == PtMarkerMsgTypes.kMarkerGameReset:
+                self.markerGameManager.registerResetGame(finalMsg)
+                self.markerGameDisplay.registerResetGame(finalMsg)
+                self.BigKICheckContentRefresh(self.BKCurrentContent)
 
-        # Is a marker being captured?
-        elif msgType == PtMarkerMsgTypes.kMarkerMarkerCaptured:
-            if self.markerGameDisplay is not None and self.markerGameDisplay.isMyMsg(finalMsg):
-                if self.markerGameManager.gameData.data["svrGameTemplateID"] != self.markerGameDisplay.gameData.data["svrGameTemplateID"]:
-                    self.markerGameDisplay.registerMarkerCaptured(finalMsg)
-            if self.markerGameManager.gameLoaded() and self.markerGameManager.isMyMsg(finalMsg):
-                self.markerGameManager.registerMarkerCaptured(finalMsg)
-        # Is a marker game's type being set?
-        elif msgType == PtMarkerMsgTypes.kMarkerGameType:
-            if self.markerGameDisplay is not None:
-                if self.markerGameDisplay.isMyMsg(finalMsg):
-                    self.markerGameDisplay.registerGameType(finalMsg)
-                return
-            self.markerGameManager.registerGameType(finalMsg)
+            # Is a game over?
+            elif msgType == PtMarkerMsgTypes.kMarkerGameOver:
+                self.markerGameManager.registerMarkerGameOver(finalMsg)
+
+            # Is a game's name being changed?
+            elif msgType == PtMarkerMsgTypes.kMarkerGameNameChanged:
+                if self.markerGameDisplay is not None:
+                    if self.markerGameDisplay.isMyMsg(finalMsg):
+                        self.markerGameDisplay.registerGameName(finalMsg)
+                    return
+                self.markerGameManager.registerGameName(finalMsg)
+
+            # Is a game being deleted?
+            elif msgType == PtMarkerMsgTypes.kMarkerGameDeleted:
+                if self.markerGameDisplay is not None:
+                    if self.markerGameDisplay.isMyMsg(finalMsg):
+                        self.markerGameDisplay = None
+                self.markerGameManager.registerDeleteGame(finalMsg)
+
+            # Is a marker being added?
+            elif msgType == PtMarkerMsgTypes.kMarkerMarkerAdded:
+                if self.markerGameDisplay is not None:
+                    if self.markerGameDisplay.isMyMsg(finalMsg):
+                        self.markerGameDisplay.registerMarker(finalMsg)
+                        if self.pendingMGmessage is not None and self.pendingMGmessage == kMessageWait.createMarker and BigKI.dialog.isEnabled():
+                            self.pendingMGmessage = None
+                            self.SetWorkingToCurrentMarkerGame()
+                        return
+                self.pendingMGmessage = None
+                self.markerGameManager.registerMarker(finalMsg)
+
+            # Is a marker being deleted?
+            elif msgType == PtMarkerMsgTypes.kMarkerMarkerDeleted:
+                if self.markerGameDisplay is not None and self.markerGameDisplay.isMyMsg(finalMsg):
+                    self.markerGameDisplay.registerDeleteMarker(finalMsg)
+                    self.BigKICheckContentRefresh(self.BKCurrentContent)
+
+            # Is a marker's name being changed?
+            elif msgType == PtMarkerMsgTypes.kMarkerMarkerNameChanged:
+                if self.markerGameDisplay is not None and self.markerGameDisplay.isMyMsg(finalMsg):
+                    self.markerGameDisplay.registerMarkerNameChanged(finalMsg)
+                    if self.pendingMGmessage is not None and self.pendingMGmessage == kMessageWait.changeMarkerName:
+                        if self.MFdialogMode == kGames.MFEditingMarker:
+                            self.BigKICheckContentRefresh(self.BKCurrentContent)
+                self.pendingMGmessage = None
+
+            # Is a marker being captured?
+            elif msgType == PtMarkerMsgTypes.kMarkerMarkerCaptured:
+                if self.markerGameDisplay is not None and self.markerGameDisplay.isMyMsg(finalMsg):
+                    if self.markerGameManager.gameData.data["svrGameTemplateID"] != self.markerGameDisplay.gameData.data["svrGameTemplateID"]:
+                        self.markerGameDisplay.registerMarkerCaptured(finalMsg)
+                if self.markerGameManager.gameLoaded() and self.markerGameManager.isMyMsg(finalMsg):
+                    self.markerGameManager.registerMarkerCaptured(finalMsg)
+            # Is a marker game's type being set?
+            elif msgType == PtMarkerMsgTypes.kMarkerGameType:
+                if self.markerGameDisplay is not None:
+                    if self.markerGameDisplay.isMyMsg(finalMsg):
+                        self.markerGameDisplay.registerGameType(finalMsg)
+                    return
+                self.markerGameManager.registerGameType(finalMsg)
 
     ## Called by Plasma on receipt of a backdoor message.
     # These backdoor messages can trigger various actions.
@@ -1181,6 +1326,19 @@ class xKI(ptModifier):
 
             # Display the message if it passed all the above checks.
             self.chatMgr.AddChatLine(player, message, cFlags, forceKI=not self.sawTheKIAtLeastOnce)
+
+            # Mirphak : Robot chat fonctionnalities (see xKiBot.py)
+            # Ask xKiBot to do the command contained in a private message
+            if cFlags.private: 
+                #self.chatMgr.AddChatLine(player, "<private start>", cFlags, forceKI=not self.sawTheKIAtLeastOnce)
+                #xKiBot.Do(self, player, message, cFlags)
+                #self.chatMgr.AddChatLine(player, "<private end>", cFlags, forceKI=not self.sawTheKIAtLeastOnce)
+                if xKiBot.amIRobot:
+                    xKiBot.Do(self, player, message, cFlags)
+                else:
+                    xKiBot.Info(self, player, message, cFlags)
+                #self.chatMgr.AddChatLine(player, "<private end>", cFlags, forceKI=not self.sawTheKIAtLeastOnce)
+            # Mirphak : end
 
             # If they are AFK and the message was directly to them, send back their state to sender.
             try:
@@ -3897,8 +4055,12 @@ class xKI(ptModifier):
 
         ageText = ptGUIControlTextBox(BigKI.dialog.getControlFromTag(kGUI.BKICurAgeNameID))
         ageName = GetAgeName().replace("(null)", "").strip()
-        PtDebugPrint(u"xKI.BigKISetStatics(): Displaying age name of {}.".format(ageName), level=kDebugDumpLevel)
+        try:
+            PtDebugPrint(u"xKI.BigKISetStatics(): Displaying age name of {}.".format(ageName), level=kDebugDumpLevel)
+        except:
+            PtDebugPrint(u"ERROR (UnicodeDecodeError in ageName).", level=kDebugDumpLevel)
         ageText.setStringW(ageName)
+        PtDebugPrint(u"xKI.BigKISetStatics(): Displaying age name of {}.".format(ageText), level=kDebugDumpLevel)
         playerText = ptGUIControlTextBox(BigKI.dialog.getControlFromTag(kGUI.BKPlayerName))
         IDText = ptGUIControlTextBox(BigKI.dialog.getControlFromTag(kGUI.BKPlayerID))
         localPlayer = PtGetLocalPlayer()
@@ -4177,10 +4339,22 @@ class xKI(ptModifier):
                 if myAge is not None:
                     if self.CanAgeInviteVistors(myAge, myAgeLink) and myAge.getAgeFilename() not in kAges.Hide:
                         PtDebugPrint(u"xKI.BigKIRefreshAgeVisitorFolders(): Refreshing visitor list for {}.".format(GetAgeName(myAge)), level=kDebugDumpLevel)
+                        #ageName = GetAgeName(myAge).encode('ascii', 'ignore')
+                        #PtDebugPrint(u"xKI.BigKIRefreshAgeVisitorFolders(): Refreshing visitor list for {}.".format(ageName), level=kDebugDumpLevel)
+                        #try:
+                        #    PtDebugPrint(u"xKI.BigKIRefreshAgeVisitorFolders(): Refreshing visitor list for {}.".format(GetAgeName(myAge)), level=kDebugDumpLevel)
+                        #except:
+                        #    PtDebugPrint(u"ERROR in PtDebugPrint GetAgeName(myAge) caused by non ascii caracters in avatar name: xKI.BigKIRefreshAgeVisitorFolders(): Refreshing visitor list for {}.".format(myAge.getAgeInstanceName()), level=kDebugDumpLevel)                            
                         folderName = xCensor.xCensor(PtGetLocalizedString("KI.Config.OwnerVisitors", [GetAgeName(myAge)]), self.censorLevel)
                         if folderName not in self.BKPlayerFolderDict:
                             # Add the new Age Visitors folder.
                             PtDebugPrint(u"xKI.BigKIRefreshAgeVisitorFolders(): Adding visitor list for {}.".format(GetAgeName(myAge)), level=kDebugDumpLevel)
+                            #ageName = GetAgeName(myAge).encode('ascii', 'ignore')
+                            #PtDebugPrint(u"xKI.BigKIRefreshAgeVisitorFolders(): Adding visitor list for {}.".format(ageName), level=kDebugDumpLevel)
+                            #try:
+                            #    PtDebugPrint(u"xKI.BigKIRefreshAgeVisitorFolders(): Adding visitor list for {}.".format(GetAgeName(myAge)), level=kDebugDumpLevel)
+                            #except:
+                            #    PtDebugPrint(u"ERROR in PtDebugPrint GetAgeName(myAge) caused by non ascii caracters in avatar name: xKI.BigKIRefreshAgeVisitorFolders(): Adding visitor list for {}.".format(myAge.getAgeInstanceName()), level=kDebugDumpLevel)                            
                             self.BKPlayerListOrder.append(folderName)
                         self.BKPlayerFolderDict[folderName] = myAge
                 else:
@@ -4406,22 +4580,47 @@ class xKI(ptModifier):
             buddies = vault.getBuddyListFolder()
             ignores = vault.getIgnoreListFolder()
 
-            for idx in range(len(self.BKContentList)):
-                ref = self.BKContentList[idx]
-                if ref is not None:
-                    if ref.getSaver() is None or ref.getSaverID() == 0:
-                        continue
+            #for idx in range(len(self.BKContentList)):
+            #    ref = self.BKContentList[idx]
+            #    if ref is not None:
+            #        if ref.getSaver() is None or ref.getSaverID() == 0:
+            #            continue
+            #
+            #        if (self.onlyGetPMsFromBuddies and not buddies.playerlistHasPlayer(ref.getSaverID())) or ignores.playerlistHasPlayer(ref.getSaverID()):
+            #            PtDebugPrint(u"xKI.BigKIProcessContentList(): Remove from inbox because it's from {}.".format(ref.getSaver().playerGetName()), level=kWarningLevel)
+            #            # Remove from the list.
+            #            removeList.insert(0, idx)
+            #            # Only remove from inbox if specified.
+            #            if removeInboxStuff:
+            #                PtDebugPrint(u"xKI.BigKIProcessContentList(): Really removed from inbox because it's from {}, this time.".format(ref.getSaver().playerGetName()), level=kWarningLevel)
+            #                # Remove from inbox (how will this work?).
+            #                element = ref.getChild()
+            #                inbox.removeNode(element)
+            if (inbox is not None and buddies is not None and ignores is not None):
+                for idx in range(len(self.BKContentList)):
+                    ref = self.BKContentList[idx]
+                    if ref is not None:
+                        if ref.getSaver() is None or ref.getSaverID() == 0:
+                            continue
 
-                    if (self.onlyGetPMsFromBuddies and not buddies.playerlistHasPlayer(ref.getSaverID())) or ignores.playerlistHasPlayer(ref.getSaverID()):
-                        PtDebugPrint(u"xKI.BigKIProcessContentList(): Remove from inbox because it's from {}.".format(ref.getSaver().playerGetName()), level=kWarningLevel)
-                        # Remove from the list.
-                        removeList.insert(0, idx)
-                        # Only remove from inbox if specified.
-                        if removeInboxStuff:
-                            PtDebugPrint(u"xKI.BigKIProcessContentList(): Really removed from inbox because it's from {}, this time.".format(ref.getSaver().playerGetName()), level=kWarningLevel)
-                            # Remove from inbox (how will this work?).
-                            element = ref.getChild()
-                            inbox.removeNode(element)
+                        if (self.onlyGetPMsFromBuddies and not buddies.playerlistHasPlayer(ref.getSaverID())) or ignores.playerlistHasPlayer(ref.getSaverID()):
+                            PtDebugPrint(u"xKI.BigKIProcessContentList(): Remove from inbox because it's from {}.".format(ref.getSaver().playerGetName()), level=kWarningLevel)
+                            # Remove from the list.
+                            removeList.insert(0, idx)
+                            # Only remove from inbox if specified.
+                            if removeInboxStuff:
+                                PtDebugPrint(u"xKI.BigKIProcessContentList(): Really removed from inbox because it's from {}, this time.".format(ref.getSaver().playerGetName()), level=kWarningLevel)
+                                # Remove from inbox (how will this work?).
+                                element = ref.getChild()
+                                inbox.removeNode(element)
+            else:
+                if inbox is None:
+                    PtDebugPrint(u"xKI.BigKIProcessContentList(): inbox is None.", level=kWarningLevel)
+                if buddies is None:
+                    PtDebugPrint(u"xKI.BigKIProcessContentList(): buddies is None.", level=kWarningLevel)
+                if ignores is None:
+                    PtDebugPrint(u"xKI.BigKIProcessContentList(): ignores is None.", level=kWarningLevel)
+            
         if removeList:
             PtDebugPrint(u"xKI.BigKIProcessContentList(): Removing {} contents from being displayed.".format(len(removeList)), level=kWarningLevel)
         for removeidx in removeList:
@@ -4947,7 +5146,13 @@ class xKI(ptModifier):
             PtDebugPrint(u"xKI.BigKIDisplayMarkerGame(): Cannot process this node, wrong data type: {}.".format(element.getType()), level=kErrorLevel)
             return
         element = element.upcastToMarkerGameNode()
-        PtDebugPrint(u"xKI.BigKIDisplayMarkerGame(): Starting Marker Game KI Display Manager, loading game: {} guid: {}.".format(element.getGameName(), element.getGameGuid()), level=kDebugDumpLevel)
+        #PtDebugPrint(u"xKI.BigKIDisplayMarkerGame(): Starting Marker Game KI Display Manager, loading game: {} guid: {}.".format(element.getGameName(), element.getGameGuid()), level=kDebugDumpLevel)
+        try:
+            PtDebugPrint(u"xKI.BigKIDisplayMarkerGame(): Starting Marker Game KI Display Manager, loading game: {} guid: {}.".format(element.getGameName(), element.getGameGuid()), level=kDebugDumpLevel)
+        except UnicodeDecodeError:
+            PtDebugPrint(u"xKI.BigKIFinishDisplayMarkerGame(): (Initialize) Marker Game name contents non ascii character(s).", level=kErrorLevel)
+            gameName = "".join([x if ord(x) < 128 else '?' for x in element.getGameName()])
+            PtDebugPrint(u"xKI.BigKIDisplayMarkerGame(): Starting Marker Game KI Display Manager, loading game: {} guid: {}.".format(gameName, element.getGameGuid()), level=kDebugDumpLevel)
 
         # There are now two possibilities:
         # 1) The player has just created a game and is displaying it.
@@ -5169,7 +5374,19 @@ class xKI(ptModifier):
                     torans = coord.getTorans()
                     hSpans = coord.getHSpans()
                     vSpans = coord.getVSpans()
-                    mlbMarkerList.addString("[{}:{},{},{}] {}".format(FilterAgeName(marker["age"]), torans, hSpans, vSpans, marker["name"]))
+                    #mlbMarkerList.addString("[{}:{},{},{}] {}".format(FilterAgeName(marker["age"]), torans, hSpans, vSpans, marker["name"]))
+                    try:
+                        mlbMarkerList.addString("[{}:{},{},{}] {}".format(FilterAgeName(marker["age"]), torans, hSpans, vSpans, marker["name"]))
+                    except UnicodeEncodeError:
+                        PtDebugPrint(u"xKI.BigKIFinishDisplayMarkerGame(): (editing) Marker name contents non ascii character(s).", level=kErrorLevel)
+                        #markerName = ""
+                        #for c in marker["name"]:
+                        #    if 0 < ord(c) < 127:
+                        #        markerName += c
+                        #    else:
+                        #        markerName += "?"
+                        markerName = "".join([x if ord(x) < 128 else '?' for x in marker["name"]])
+                        mlbMarkerList.addString("[{}:{},{},{}] {}".format(FilterAgeName(marker["age"]), torans, hSpans, vSpans, markerName))
 
                 mlbMarkerTextTB.hide()
                 mbtnToran.hide()
@@ -5190,7 +5407,13 @@ class xKI(ptModifier):
                     mtbPlayEnd.show()
                     mlbMarkerList.hide()
                     mlbMarkerTextTB.show()
-                    mlbMarkerTextTB.setString(selectedMarker.data["name"])
+                    #mlbMarkerTextTB.setString(selectedMarker.data["name"])
+                    if isinstance(selectedMarker.data["name"], str):
+                        mlbMarkerTextTB.setString(selectedMarker.data["name"])
+                    else:
+                        PtDebugPrint(u"xKI.BigKIFinishDisplayMarkerGame(): (editing) Marker name contents non ascii character(s).", level=kErrorLevel)
+                        markerName = "".join([x if ord(x) < 128 else '?' for x in selectedMarker.data["name"]])
+                        mlbMarkerTextTB.setString(markerName)
                     mbtnToran.show()
                     mbtnHSpan.show()
                     mbtnVSpan.show()
@@ -5257,7 +5480,19 @@ class xKI(ptModifier):
                     coord = ptDniCoordinates()
                     markerPoint = ptPoint3(marker["x"], marker["y"], marker["z"])
                     coord.fromPoint(markerPoint)
-                    mlbMarkerList.addString("[{}:{},{},{}] {}".format(FilterAgeName(marker["age"]), coord.getTorans(), coord.getHSpans(), coord.getVSpans(), marker["name"]))
+                    #mlbMarkerList.addString("[{}:{},{},{}] {}".format(FilterAgeName(marker["age"]), coord.getTorans(), coord.getHSpans(), coord.getVSpans(), marker["name"]))
+                    try:
+                        mlbMarkerList.addString("[{}:{},{},{}] {}".format(FilterAgeName(marker["age"]), coord.getTorans(), coord.getHSpans(), coord.getVSpans(), marker["name"]))
+                    except UnicodeEncodeError:
+                        PtDebugPrint(u"xKI.BigKIFinishDisplayMarkerGame(): (playing) Marker name contents non ascii character(s).", level=kErrorLevel)
+                        #markerName = ""
+                        #for c in marker["name"]:
+                        #    if 0 < ord(c) < 127:
+                        #        markerName += c
+                        #    else:
+                        #        markerName += "?"
+                        markerName = "".join([x if ord(x) < 128 else '?' for x in marker["name"]])
+                        mlbMarkerList.addString("[{}:{},{},{}] {}".format(FilterAgeName(marker["age"]), coord.getTorans(), coord.getHSpans(), coord.getVSpans(), markerName))
                 else:
                     questGameFinished = False
             mlbMarkerTextTB.hide()
@@ -5516,7 +5751,13 @@ class xKI(ptModifier):
                             element.setGameName(control.getString())
                             title.setString(control.getString())
                             element.save()
-                            PtDebugPrint(u"xKI.SaveMarkerGameNameFromEdit(): Updating title to \"{}\".".format(newText), level=kDebugDumpLevel )
+                            #PtDebugPrint(u"xKI.SaveMarkerGameNameFromEdit(): Updating title to \"{}\".".format(newText), level=kDebugDumpLevel )
+                            try:
+                                PtDebugPrint(u"xKI.SaveMarkerGameNameFromEdit(): Updating title to \"{}\".".format(newText), level=kDebugDumpLevel)
+                            except UnicodeDecodeError:
+                                PtDebugPrint(u"xKI.SaveMarkerGameNameFromEdit(): Game name contents non ascii character(s).", level=kErrorLevel)
+                                newGameName = "".join([x if ord(x) < 128 else '?' for x in newText])
+                                PtDebugPrint(u"xKI.SaveMarkerGameNameFromEdit(): Updating title to \"{}\".".format(newGameName), level=kDebugDumpLevel)
                             self.RefreshPlayerList()
                             self.markerGameDisplay.setGameName(newText)
                         else:
@@ -6066,15 +6307,9 @@ class xKI(ptModifier):
                             pass
                         elif isinstance(self.BKPlayerSelected, Device):
                             if self.BKPlayerSelected.name in self.imagerMap:
-                                notify = ptNotify(self.key)
-                                notify.clearReceivers()
-                                notify.addReceiver(self.imagerMap[self.BKPlayerSelected.name])
-                                notify.netPropagate(1)
-                                notify.netForce(1)
-                                notify.setActivate(1.0)
                                 sName = "Upload={}".format(self.BKPlayerSelected.name)
-                                notify.addVarNumber(sName, sendElement.getID())
-                                notify.send()
+                                #SendNote(self.key, self.imagerMap[self.BKPlayerSelected.name], sName, sendElement.getID(), True)
+                                SendNote(self.key, self.imagerMap[self.BKPlayerSelected.name], sName, sendElement.getID())
                             toPlayerBtn.hide()
                         elif isinstance(self.BKPlayerSelected, ptVaultNode):
                             if self.BKPlayerSelected.getType() == PtVaultNodeTypes.kPlayerInfoListNode:
@@ -6650,27 +6885,34 @@ class xKI(ptModifier):
     # This handles the edit buttons, marker saving buttons, deletion buttons,
     # etc..
     def ProcessNotifyMarkerFolderExpanded(self, control, event):
-
+        PtDebugPrint(u"xKI.ProcessNotifyMarkerFolderExpanded(): Begining.", level=kDebugDumpLevel)
         # Display a loading message just in case.
         self.pendingMGaction = PtGetLocalizedString("KI.MarkerGame.pendingActionLoading")
 
         if event == kDialogLoaded:
+            PtDebugPrint(u"xKI.ProcessNotifyMarkerFolderExpanded(): event == kDialogLoaded.", level=kDebugDumpLevel)
             typeField = ptGUIControlTextBox(KIMarkerFolderExpanded.dialog.getControlFromTag(kGUI.MarkerFolderGameTimeTB))
             typeField.setString(kLoc.MarkerFolderPopupMenu[self.markerGameTimeID][0])
         elif event == kShowHide:
+            PtDebugPrint(u"xKI.ProcessNotifyMarkerFolderExpanded(): event == kShowHide.", level=kDebugDumpLevel)
             # Reset the edit text lines.
             if control.isEnabled():
+                PtDebugPrint(u"xKI.ProcessNotifyMarkerFolderExpanded(): control.isEnabled().", level=kDebugDumpLevel)
                 titleEdit = ptGUIControlEditBox(KIMarkerFolderExpanded.dialog.getControlFromTag(kGUI.MarkerFolderTitleEB))
                 titleEdit.hide()
                 markerEdit = ptGUIControlEditBox(KIMarkerFolderExpanded.dialog.getControlFromTag(kGUI.MarkerFolderMarkerTextEB))
                 markerEdit.hide()
                 self.BigKIDisplayMarkerGame()
             else:
+                PtDebugPrint(u"xKI.ProcessNotifyMarkerFolderExpanded(): control is Disabled.", level=kDebugDumpLevel)
                 if self.markerGameDisplay is not None and self.markerGameDisplay.gameData is not None:
+                    PtDebugPrint(u"xKI.ProcessNotifyMarkerFolderExpanded(): .", level=kDebugDumpLevel)
                     # Possibly still adding markers, check if in edit mode before destroying the game.
                     if not self.markerGameDisplay.showMarkers:
+                        PtDebugPrint(u"xKI.ProcessNotifyMarkerFolderExpanded(): .", level=kDebugDumpLevel)
                         self.markerGameDisplay = None
         elif event == kAction or event == kValueChanged:
+            PtDebugPrint(u"xKI.ProcessNotifyMarkerFolderExpanded(): event == kAction or event == kValueChanged.", level=kDebugDumpLevel)
             mFldrID = control.getTagID()
             if mFldrID == kGUI.MarkerFolderEditStartGame:
                 # Is it the "Edit" button?
@@ -6699,6 +6941,7 @@ class xKI(ptModifier):
                     self.markerGameDisplay.setSelectedMarker(-1)
                     self.BigKICheckContentRefresh(self.BKCurrentContent)
             elif mFldrID == kGUI.MarkerFolderPlayEndGame:
+                PtDebugPrint(u"xKI.ProcessNotifyMarkerFolderExpanded(): mFldrID == kGUI.MarkerFolderPlayEndGame.", level=kDebugDumpLevel)
                 # Is it the "Play Game" button?
                 if self.MFdialogMode == kGames.MFOverview:
                     self.pendingMGaction = PtGetLocalizedString("KI.MarkerGame.pendingActionPrepareGame")
@@ -6717,6 +6960,7 @@ class xKI(ptModifier):
                     self.markerGameDisplay.deleteSelectedMarker()
 
             elif mFldrID == kGUI.MarkerFolderMarkListbox:
+                PtDebugPrint(u"xKI.ProcessNotifyMarkerFolderExpanded(): mFldrID == kGUI.MarkerFolderMarkListbox.", level=kDebugDumpLevel)
                 if self.markerGameDisplay is not None:
                     markerlistSelectable = True
                     if self.markerGameDisplay.gameData.data["svrGameTypeID"] == PtMarkerGameTypes.kMarkerGameQuest:
@@ -6729,6 +6973,7 @@ class xKI(ptModifier):
                         self.BigKICheckContentRefresh(self.BKCurrentContent)
 
             elif mFldrID == kGUI.MarkerFolderTitleBtn:
+                PtDebugPrint(u"xKI.ProcessNotifyMarkerFolderExpanded(): mFldrID == kGUI.MarkerFolderTitleBtn.", level=kDebugDumpLevel)
                 control.disable()
                 title = ptGUIControlTextBox(KIMarkerFolderExpanded.dialog.getControlFromTag(kGUI.MarkerFolderTitleText))
                 titleEdit = ptGUIControlEditBox(KIMarkerFolderExpanded.dialog.getControlFromTag(kGUI.MarkerFolderTitleEB))
@@ -6766,6 +7011,7 @@ class xKI(ptModifier):
                 self.LocalizeDialog(1)
                 KIYesNo.dialog.show()
         elif event == kFocusChange:
+            PtDebugPrint(u"xKI.ProcessNotifyMarkerFolderExpanded(): event == kFocusChange.", level=kDebugDumpLevel)
             titleEdit = ptGUIControlEditBox(KIMarkerFolderExpanded.dialog.getControlFromTag(kGUI.MarkerFolderTitleEB))
             # Is the editbox enabled and something other than the button is getting the focus?
             if titleEdit.isVisible():

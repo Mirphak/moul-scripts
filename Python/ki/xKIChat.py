@@ -58,12 +58,18 @@ import xKIExtChatCommands
 from xKIConstants import *
 from xKIHelpers import *
 
+# Marker Editor
+import xMarkerEditor
+
+# Robot commands
+import xKiBot
+
 
 ## A class to process all the RT Chat functions of the KI.
 class xKIChat(object):
 
     ## Set up the chat manager's default state.
-    def __init__(self, StartFadeTimer, KillFadeTimer, FadeCompletely):
+    def __init__(self, StartFadeTimer, KillFadeTimer, FadeCompletely, xKI):
 
         # Set the default properties.
         self.autoShout = False
@@ -95,6 +101,8 @@ class xKIChat(object):
 
         # Add the commands processor.
         self.commandsProcessor = CommandsProcessor(self)
+
+        self.xKI = xKI
 
     #######
     # GUI #
@@ -535,7 +543,8 @@ class xKIChat(object):
             if not self.KIDisabled and not mKIdialog.isEnabled():
                 mKIdialog.show()
         if player is not None:
-            chatHeaderFormatted = pretext + unicode(player.getPlayerName()) + U":"
+            #chatHeaderFormatted = pretext + unicode(player.getPlayerName()) + U":"
+            chatHeaderFormatted = pretext + unicode(player.getPlayerName(), kCharSet) + U":"
             chatMessageFormatted = U" " + message
         else:
             # It must be a status or error message.
@@ -806,6 +815,7 @@ class CommandsProcessor:
         if PtIsInternalRelease():
             commands.update(kCommands.Internal)
         commands.update(kCommands.EasterEggs)
+        commands.update(kCommands.MarkerEditor)
 
         # Does the message contain a standard command?
         for command, function in commands.iteritems():
@@ -815,6 +825,8 @@ class CommandsProcessor:
                     params = theMessage[1]
                 else:
                     params = None
+                text = u"==> function:{0}, params:\"{1}\"".format(function, params)
+                PtDebugPrint(text)
                 getattr(self, function)(params)
                 return None
 
@@ -822,6 +834,25 @@ class CommandsProcessor:
         for command, text in kCommands.Text.iteritems():
             if msg.startswith(command):
                 self.chatMgr.AddChatLine(None, text, 0)
+                return None
+
+        # Mirphak : Is it a robot command?
+        for command, function in kCommands.Robot.iteritems():
+            if msg.startswith(command):
+                text = u"==> command: \"{}\"".format(command)
+                PtDebugPrint(text)
+                #theMessage = message.split(" ", 1)
+                theMessage = message[len(command):].strip()
+                text = u"==> theMessage: \"{}\"".format(theMessage)
+                #if len(theMessage) > 1 and theMessage[1]:
+                #    params = theMessage[1]
+                if len(theMessage) > 0:
+                    params = theMessage
+                else:
+                    params = None
+                text = u"==> function:{0}, params:\"{1}\"".format(function, params)
+                PtDebugPrint(text)
+                getattr(self, function)(params)
                 return None
 
         # Is it another text-based easter-egg command?
@@ -841,6 +872,21 @@ class CommandsProcessor:
             fldr = xLocTools.FolderIDToFolderName(PtVaultStandardNodes.kAllPlayersFolder)
             self.chatMgr.AddChatLine(ptPlayer(fldr, 0), send, cFlags)
             return None
+
+        # Mirphak : 
+        #----------------#
+        # Robot commands #
+        #----------------#
+        text = u"CommandsProcessor(): The message begins with {} ?".format(xKiBot.startChar)
+        PtDebugPrint(text)
+        if message.startswith(xKiBot.startChar):
+            text = u"CommandsProcessor(): ==> This is a robot command."
+            PtDebugPrint(text)
+            xKiBot.SetCommand(self, message[1:])
+            return None
+        else:
+            text = u"CommandsProcessor(): ==> This is not a robot command."
+            PtDebugPrint(text)
 
         # Is it an emote, a "/me" or invalid command?
         if message.startswith("/"):
@@ -1094,7 +1140,7 @@ class CommandsProcessor:
         for script in pythonScripts:
             if script.getName() == kJalakPythonComponent:
                 PtDebugPrint(u"xKIChat.SaveColumns(): Found Jalak's python component.", level=kDebugDumpLevel)
-                SendNote(self.chatMgr.key, "SaveColumns;" + fName)
+                SendNote(self.chatMgr.key, script, "SaveColumns;" + fName)
                 return
         PtDebugPrint(u"xKIChat.SaveColumns(): Did not find Jalak's python component.", level=kErrorLevel)
 
@@ -1283,3 +1329,62 @@ class CommandsProcessor:
                 self.chatMgr.AddChatLine(None, pOut, 0)
         else:
             self.chatMgr.AddChatLine(None, "There is nothing there but lint.", 0)
+
+    #~~~~~~~~~~~~~~~~~~~~~~~~#
+    # Marker Editor Commands #
+    #~~~~~~~~~~~~~~~~~~~~~~~~#
+
+    ## Downloads the specified Marker Game to a file.
+    def DownloadGame(self, gameID):
+
+        if gameID is not None:
+            try:
+                gameID = int(gameID)
+                xMarkerEditor.DownloadGame(self.chatMgr.xKI, gameID)
+            except ValueError:
+                self.chatMgr.DisplayStatusMessage("Please specify a valid numeric ID.")
+        else:
+            self.chatMgr.DisplayStatusMessage("Please specify the ID of the game you wish to download.")
+
+    ## Downloads all Marker Games to files.
+    def DownloadAllGames(self, folderName):
+        xMarkerEditor.StartDownloadAllGames(self.chatMgr.xKI, folderName)
+        #xMarkerEditor.DownloadAllGames(self.chatMgr.xKI, folderName)
+        #try:
+        #    xMarkerEditor.DownloadAllGames(self.chatMgr.xKI)
+        #except ValueError:
+        #    self.chatMgr.DisplayStatusMessage("Please specify a valid numeric ID.")
+
+    ## Stops Downloading all Marker Games to files.
+    def StopDownloadAllGames(self, folderName):
+        xMarkerEditor.StopDownloadAllGames(self.chatMgr.xKI)
+
+    ## Uploads the specified Marker Game from a file.
+    def UploadGame(self, gameFileName):
+
+        if gameFileName:
+            xMarkerEditor.UploadGame(self.chatMgr.xKI, gameFileName)
+        else:
+            self.chatMgr.DisplayStatusMessage("Please specify the filename in \"Games\" you want opened.")
+
+    ## Lists all the Marker Games available for download.
+    def ListGames(self, params):
+
+        xMarkerEditor.ListGames(self.chatMgr.xKI)
+    
+    ## ExecuteRobotCommand
+    def ExecuteRobotCommand(self, params):
+        cFlags = ChatFlags(0)
+        cFlags.toSelf = True
+        cFlags.status = True
+        #cFlags.admin = True
+        #cFlags.ccrBcast = False
+        #cFlags.broadcast = False
+        #cFlags.private = False
+        #cFlags.interAge = False
+        #cFlags.neighbors = False
+        #cFlags.channel = self.privateChatChannel
+        if params:
+            xKiBot.Do(self.chatMgr.xKI, PtGetLocalPlayer(), params, cFlags)
+        else:
+            self.chatMgr.DisplayStatusMessage("No command given.")

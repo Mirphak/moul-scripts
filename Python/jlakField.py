@@ -180,13 +180,34 @@ class jlakField(ptResponder):
         ageSDL.setNotify(self.key,sdlRamp,0.0)
         ageSDL.setNotify(self.key,sdlRect,0.0)
         ageSDL.setNotify(self.key,sdlGUILock,0.0)
-        byteStartPt = ageSDL[sdlStartPt][0]
-        boolWall = ageSDL[sdlWall][0]
-        byteSphere = ageSDL[sdlSphere][0]
-        byteLilBox = ageSDL[sdlLilBox][0]
-        byteBigBox = ageSDL[sdlBigBox][0]
-        byteRamp = ageSDL[sdlRamp][0]
-        byteRect = ageSDL[sdlRect][0]
+        try:
+            byteStartPt = ageSDL[sdlStartPt][0]
+        except KeyError:
+            PtDebugPrint("nglnTreeMonkey.OnServerInitComplete():\tWARNING: SDL key {0} does not exist!".format(sdlStartPt))
+        try:
+            boolWall = ageSDL[sdlWall][0]
+        except KeyError:
+            PtDebugPrint("nglnTreeMonkey.OnServerInitComplete():\tWARNING: SDL key {0} does not exist!".format(sdlWall))
+        try:
+            byteSphere = ageSDL[sdlSphere][0]
+        except KeyError:
+            PtDebugPrint("nglnTreeMonkey.OnServerInitComplete():\tWARNING: SDL key {0} does not exist!".format(sdlSphere))
+        try:
+            byteLilBox = ageSDL[sdlLilBox][0]
+        except KeyError:
+            PtDebugPrint("nglnTreeMonkey.OnServerInitComplete():\tWARNING: SDL key {0} does not exist!".format(sdlLilBox))
+        try:
+            byteBigBox = ageSDL[sdlBigBox][0]
+        except KeyError:
+            PtDebugPrint("nglnTreeMonkey.OnServerInitComplete():\tWARNING: SDL key {0} does not exist!".format(sdlBigBox))
+        try:
+            byteRamp = ageSDL[sdlRamp][0]
+        except KeyError:
+            PtDebugPrint("nglnTreeMonkey.OnServerInitComplete():\tWARNING: SDL key {0} does not exist!".format(sdlRamp))
+        try:
+            byteRect = ageSDL[sdlRect][0]
+        except KeyError:
+            PtDebugPrint("nglnTreeMonkey.OnServerInitComplete():\tWARNING: SDL key {0} does not exist!".format(sdlRect))
         
         #If the last person links out while a bulk move is being performed the SDL gets stuck!
         #So we'll reset it only if we're the first person entering the age....

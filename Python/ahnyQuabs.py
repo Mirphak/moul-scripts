@@ -155,7 +155,12 @@ class ahnyQuabs(ptModifier, object):
 
     def _Think(self, brain, name):
         """Basic quab thought logic (scurry, scurry, scurry)"""
-        running = self._IsRunningAway(brain)
+        #running = self._IsRunningAway(brain)
+        try:
+            running = self._IsRunningAway(brain)
+        except RuntimeError:
+            PtDebugPrint("ahnyQuabs._Think():\tQuab brain running neither the idle nor the run behavior!", level=kDebugDumpLevel)
+            return
 
         # Quabs spook very easily. They are also stupid like dogs--they run
         # in a straight line away from whatever is chasing them. Fun fact: alligators

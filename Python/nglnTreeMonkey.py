@@ -100,7 +100,12 @@ class nglnTreeMonkey(ptResponder):
         ageSDL.setNotify(self.key, "MonkeySpawnTimes", 0.0)
 
         thisDay = int(PtGetDniTime() / kDayLengthInSeconds)
-        lastDay = int(ageSDL["MonkeyLastUpdated"][0] / kDayLengthInSeconds)
+        #lastDay = int(ageSDL["MonkeyLastUpdated"][0] / kDayLengthInSeconds)
+        try:
+            lastDay = int(ageSDL["MonkeyLastUpdated"][0] / kDayLengthInSeconds)
+        except KeyError:
+            PtDebugPrint("nglnTreeMonkey.OnServerInitComplete():\tWARNING: SDL key MonkeyLastUpdated does not exist!")
+            lastDay = 0
 
         if (thisDay - lastDay) > 0:
             print "nglnTreeMonkey: It's been at least a day since the last update, running new numbers now."

@@ -2,7 +2,7 @@
 """ *==LICENSE==*
 
 CyanWorlds.com Engine - MMOG client, server and tools
-Copyright (C) 2011  Cyan Worlds, Inc.
+Copyright (C) 2011 Cyan Worlds, Inc.
 
 This program is free software: you can redistribute it and/or modify
 it under the terms of the GNU General Public License as published by
@@ -11,11 +11,11 @@ the Free Software Foundation, either version 3 of the License, or
 
 This program is distributed in the hope that it will be useful,
 but WITHOUT ANY WARRANTY; without even the implied warranty of
-MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 GNU General Public License for more details.
 
 You should have received a copy of the GNU General Public License
-along with this program.  If not, see <http://www.gnu.org/licenses/>.
+along with this program. If not, see <http://www.gnu.org/licenses/>.
 
 Additional permissions under GNU GPL version 3 section 7
 
@@ -34,12 +34,12 @@ the parts of OpenSSL and IJG JPEG Library used as well as that of the covered
 work.
 
 You can contact Cyan Worlds, Inc. by email legal@cyan.com
- or by snail mail at:
-      Cyan Worlds, Inc.
-      14617 N Newport Hwy
-      Mead, WA   99021
+or by snail mail at:
+Cyan Worlds, Inc.
+14617 N Newport Hwy
+Mead, WA 99021
 
- *==LICENSE==* """
+*==LICENSE==* """
 
 import re
 
@@ -316,13 +316,13 @@ def GetNeighbors():
         return None
 
 ## Sends a notification message to a script.
-def SendNote(key, script, extraInfo):
+def SendNote(key, script, name, varValue=1.0, net=False):
 
     note = ptNotify(key)
     note.clearReceivers()
     note.addReceiver(script)
-    note.netPropagate(0)
-    note.netForce(0)
+    note.netPropagate(net)
+    note.netForce(net)
     note.setActivate(1.0)
-    note.addVarNumber(str(extraInfo), 1.0)
+    note.addVarNumber(str(name), varValue)
     note.send()

@@ -250,11 +250,17 @@ class kCommands:
                   "/look in pocket" : "LookForFeathers"}
     Text = {"/go" : "Put one foot in front of the other and eventually you will get there.",
             "/fly" : "You close your eyes, you feel light headed and the ground slips away from your feet... Then you open your eyes and WAKE UP! (Ha, you can only dream about flying.)"}
+    MarkerEditor = {"/download" : "DownloadGame",
+                    "/downall" : "DownloadAllGames",
+                    "/stopdownall" : "StopDownloadAllGames",
+                    "/upload" : "UploadGame",
+                    "/list" : "ListGames"}
+    Robot = {"//" : "ExecuteRobotCommand"}
 
 ## Numeric limits for the KI.
 class kLimits:
     JournalTextSize = 2048
-    MaxPictures = 15
+    MaxPictures = 150
     MaxNotes = 30
     MaxMarkerFolders = 10
     MaxMarkers = 1000
