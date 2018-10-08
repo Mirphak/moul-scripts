@@ -80,6 +80,9 @@ from xKIHelpers import *
 # Marker Game thingies
 import xMarkerMgr
 
+# Robot commands
+import xKiBot
+
 # Define the attributes that will be entered in Max.
 KIBlackbar = ptAttribGUIDialog(1, "The Blackbar dialog")
 xKIChat.KIBlackbar = KIBlackbar
@@ -272,7 +275,7 @@ class xKI(ptModifier):
         self.autocompleteState = AutocompleteState()
 
         ## The chatting manager.
-        self.chatMgr = xKIChat.xKIChat(self.StartFadeTimer, self.ResetFadeState, self.FadeCompletely, self.GetCensorLevel)
+        self.chatMgr = xKIChat.xKIChat(self.StartFadeTimer, self.ResetFadeState, self.FadeCompletely, self.GetCensorLevel, self)
 
     ## Unloads any loaded dialogs upon exit.
     def __del__(self):
@@ -1045,6 +1048,20 @@ class xKI(ptModifier):
 
             # Display the message if it passed all the above checks.
             self.chatMgr.AddChatLine(player, message, cFlags, forceKI=not self.sawTheKIAtLeastOnce)
+
+            # Mirphak : Robot chat fonctionnalities (see xKiBot.py)
+            # Ask xKiBot to do the command contained in a private message
+            if cFlags.private: 
+                if xKiBot.amIRobot:
+                    try:
+                        xKiBot.Do(self, player, message, cFlags)
+                    except:
+                        PtDebugPrint(u"xKI.OnRTChat(): ERROR IN xKiBot.Do(\"{}\").".format(message))
+                else:
+                    try:
+                        xKiBot.Info(self, player, message, cFlags)
+                    except:
+                        PtDebugPrint(u"xKI.OnRTChat(): ERROR IN xKiBot.Info(\"{}\").".format(message))
 
             # If they are AFK and the message was directly to them, send back their state to sender.
             try:

@@ -60,12 +60,16 @@ import xKIExtChatCommands
 from xKIConstants import *
 from xKIHelpers import *
 
+# Robot commands
+import xKiBot
+
+import xReadWritePosition
 
 ## A class to process all the RT Chat functions of the KI.
 class xKIChat(object):
 
     ## Set up the chat manager's default state.
-    def __init__(self, StartFadeTimer, ResetFadeState, FadeCompletely, GetCensorLevel):
+    def __init__(self, StartFadeTimer, ResetFadeState, FadeCompletely, GetCensorLevel, xKI):
 
         # Set the default properties.
         self.chatLogFile = None
@@ -101,6 +105,8 @@ class xKIChat(object):
         # Message History
         self.MessageHistoryIs = -1 # Current position in message history (up/down key)
         self.MessageHistoryList = [] # Contains our message history
+
+        self.xKI = xKI
 
     #######
     # GUI #
@@ -842,6 +848,17 @@ class CommandsProcessor:
                 self.chatMgr.AddChatLine(None, text, 0)
                 return None
 
+       # Mirphak : Is it a robot command?
+        for command, function in kCommands.Robot.iteritems():
+            if msg.startswith(command):
+                theMessage = message[len(command):].strip()
+                if len(theMessage) > 0:
+                    params = theMessage
+                else:
+                    params = None
+                getattr(self, function)(params)
+                return None
+
         # Is it another text-based easter-egg command?
         if msg.startswith("/get "):
             v = "is"
@@ -859,6 +876,17 @@ class CommandsProcessor:
             fldr = xLocTools.FolderIDToFolderName(PtVaultStandardNodes.kAllPlayersFolder)
             self.chatMgr.AddChatLine(ptPlayer(fldr, 0), send, cFlags)
             return None
+
+        #--------------------------#
+        # Mirphak : Robot commands #
+        #--------------------------#
+        if message.startswith(xKiBot.startChar):
+            try:
+                command = message[1:]
+                xKiBot.SetCommand(self, command)
+                return None
+            except:
+                PtDebugPrint(u"xKIChat.commandsProcessor(): Robot command function did not run.", command, level=kErrorLevel)
 
         # Is it an emote, a "/me" or invalid command?
         if message.startswith("/"):
@@ -1426,3 +1454,30 @@ class CommandsProcessor:
             self.chatMgr.AddChatLine(None, "Current Reward: '{}'".format(markerMgr.reward), 0)
         else:
             self.chatMgr.AddChatLine(None, "This game has no associated reward.", 0)
+
+    ## Save your position in a file
+    def SavePosition(self, strIndex):
+        if not strIndex:
+            strIndex = "0"
+        xReadWritePosition.WriteMatrix44(self, strIndex)
+        self.chatMgr.AddChatLine(None, "Your position is saved. Use \"\\ws {}\" to return to this position.".format(strIndex), 0)
+
+    ## Warp you to your saved position
+    def ReturnToPosition(self, strIndex):
+        if not strIndex:
+            strIndex = "0"
+        ret = xReadWritePosition.WarpToSaved(self, strIndex)
+        if ret:
+            self.chatMgr.AddChatLine(None, "You are at your saved position {}.".format(strIndex), 0)
+        else:
+            self.chatMgr.AddChatLine(None, "No saved position found. Did you use \"\\save <number>\" before?", kChat.SystemMessage)
+    
+    ## Execute a robot command
+    def ExecuteRobotCommand(self, params):
+        cFlags = ChatFlags(0)
+        cFlags.toSelf = True
+        cFlags.status = True
+        if params:
+            xKiBot.Do(self.chatMgr.xKI, PtGetLocalPlayer(), params, cFlags)
+        else:
+            self.chatMgr.DisplayStatusMessage("No command given.")

@@ -69,6 +69,7 @@ def SendChatMessage(self, fromPlayer, plyrList, message, flags):
     plyrList = filter(lambda pl: pl.getPlayerID() != PtGetLocalPlayer().getPlayerID(), plyrList)
     if message is None:
         message = "Oops, I forgot what I had to tell you!"
+    
     if len(plyrList) > 0:
         # Don't take care of flags nor bots, always send message as buddies inter-age
         PtSendRTChat(fromPlayer, plyrList, message, 24)
@@ -2984,7 +2985,7 @@ def Help(self, cFlags, args = []):
         cmdName = args[1]
         HelpCmd(self, player, cFlags, cmdName)
         return 1
-    # si pas de commade specifiee, envoyer le KiMail
+    # si pas de commande specifiee, envoyer le KiMail
     
 #    #pour en mettre une copie dans mon journal Nexus
 #    journals = ptVault().getAgeJournalsFolder()

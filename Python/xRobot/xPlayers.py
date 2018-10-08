@@ -41,7 +41,18 @@ def Cercle(coef=5.0, h=10.0, avCentre=None):
         avatar.netForce(1)
         avatar.physics.warp(matrix)
 
-# v2
+# Is the player a buddie
+def IsBud(idplayer):
+    vault = ptVault()
+    buddies = vault.getBuddyListFolder()
+    try:
+        localPlayer = PtGetLocalPlayer()
+        if idplayer != localPlayer.getPlayerID():
+            return buddies.playerlistHasPlayer(idplayer)
+    except:
+        return None
+
+# Add a new player in my buddy list
 def AddBud(idplayer):
     vault = ptVault()
     buddies = vault.getBuddyListFolder()
